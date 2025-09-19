@@ -1,0 +1,373 @@
+eps*randn(2*10*(paramSTAP.samplesPerFrame),paramSTAP.radarAntenna.NumElements)
+
+
+
+paramSTAP.target1Dop
+
+
+
+stop time > CPI  ; CPI = pulses/PRF ;
+
+
+The usual way is to **log the Simulink signal to the base workspace** and then plot it in MATLAB.
+
+### 1) Log the signal
+
+* Drop a **To Workspace** block on the wire you want (you already have one called `waveform` in your screenshot).
+* Set **Variable name** (e.g., `wf`), **Limit data points** = `inf`, **Save format** = either **Timeseries** (easiest) or **Array**.
+
+Run the model. The variable will appear in the workspace.
+
+---
+
+### 2) Plot it in MATLAB
+
+#### If you saved as **Timeseries**
+
+```matlab
+% wf is a timeseries
+figure
+plot(wf.Time, wf.Data)                % for real-valued signals
+xlabel('Time (s)'), ylabel('Amplitude'), grid on
+```
+
+For complex data:
+
+```matlab
+figure; plot(wf.Time, abs(wf.Data));  % magnitude
+xlabel('Time (s)'), ylabel('|x(t)|')
+```
+
+#### If you saved as **Array**
+
+Simulink gives you an N×M matrix (rows = samples). Build a time axis using the sample rate `fs` (or the block’s sample time `Ts`).
+
+```matlab
+fs = 1e6;                 % <-- your sample rate
+t  = (0:size(wf,1)-1)/fs;
+
+figure
+plot(t, wf)               % if wf is N×1
+xlabel('Time (s)'), ylabel('Amplitude'), grid on
+
+% complex example
+figure
+plot(t, abs(wf)), xlabel('Time (s)'), ylabel('|x(t)|')
+```
+
+#### If you saved as **Structure With Time**
+
+```matlab
+t = wf.time;
+y = wf.signals.values;     % N×M
+figure; plot(t,y), grid on
+```
+
+---
+
+### 3) Alternative: signal logging / `logsout`
+
+You can right-click the signal → **Log Selected Signals** and run the model. Then:
+
+```matlab
+el = logsout.getElement(1);     % or by name: logsout.get('waveform')
+t  = el.Values.Time;
+y  = el.Values.Data;
+plot(t,y)
+```
+
+> Tip: For multi-channel signals (e.g., a 10×10 URA flattened to 100 channels), `y` will be N×100. Plot any channel with `plot(t, y(:,k))
+
+workkspace 2
+
+The easiest way is to log the **cube** to the workspace and then plot “range vs pulse index”.
+
+### 1) Log the cube
+
+* Put a **To Workspace** block on the output of **Matrix → Cube**.
+* Variable name: `XC`
+* Save format: **Array** (not structure)
+* Run the model for one CPI (10 frames/pulses).
+
+Now `XC` in the base workspace is a 3-D array of size:
+
+```
+XC  ->  [Nr  ×  Ne  ×  Np]
+          ^     ^      ^
+       range  elements pulses (=10)
+```
+
+### 2) Plot the 10 pulses in MATLAB
+
+```matlab
+% Assume sample rate fs is known (same as your waveform’s SampleRate)
+fs = 1e6;                       % <-- change if yours is different
+
+[Nr,Ne,Np] = size(XC);          % Np should be 10
+fprintf('Cube size: Nr=%d, Ne=%d, Np=%d\n',Nr,Ne,Np);
+
+% Pick one array element and look at all pulses
+kElem = 1;                      % element index to display
+Y = squeeze(XC(:,kElem,:));     % [Nr x Np] fast-time vs pulse
+
+% Overlay the 10 pulses in time
+t = (0:Nr-1)/fs;
+figure; plot(t, abs(Y)); grid on
+xlabel('Fast time (s)'); ylabel('|amplitude|');
+title('Overlay of the 10 pulses (one array element)');
+
+% Or show them as an image: fast-time vs pulse index
+figure; imagesc(0:Np-1, t, 20*log10(abs(Y)+eps));
+axis xy; colorbar; colormap turbo
+xlabel('Pulse index'); ylabel('Fast time (s)');
+title('Range (fast-time) vs Pulse index');
+
+% If you want to see the slow-time sequence at a specific range bin:
+rBin = 70;                                  % choose your CUT
+x = squeeze(XC(rBin, :, :));                % [Ne x Np]
+slow = mean(x,1);                           % average across elements
+figure; stem(0:Np-1, abs(slow),'filled'); grid on
+xlabel('Pulse index'); ylabel('|mean amplitude|');
+title(sprintf('Slow-time at range bin %d', rBin));
+```
+
+This confirms you are collecting **10 pulses** and lets you visualize them either overlaid in fast time or as a “range vs pulse” image.
+yep — you don’t have to overlay them. here are three quick ways to step through the **10 pulses** one-by-one after you’ve logged the cube `XC` (size `[Nr × Ne × Np]`) from **Matrix→Cube**.
+
+### Setup (once)
+
+```matlab
+fs = 1e6;                    % your sample rate
+kElem = 1;                   % which array element to view
+[Nr,Ne,Np] = size(XC);
+Y = squeeze(XC(:,kElem,:));  % [Nr x Np]  (fast-time × pulse)
+t = (0:Nr-1)/fs;
+```
+
+---
+
+## 1) Step through with a key press (simple)
+
+```matlab
+figure;
+for p = 1:Np
+    plot(t, abs(Y(:,p))); grid on
+    xlabel('Time (s)'); ylabel('|amplitude|');
+    title(sprintf('Pulse %d of %d  (element %d)', p, Np, kElem));
+    xlim([t(1) t(end)]);
+    drawnow;
+    waitforbuttonpress;  % press any key for next pulse
+end
+```
+
+## 2) Animate with a short pause
+
+```matlab
+figure;
+for p = 1:Np
+    plot(t, abs(Y(:,p))); grid on
+    xlabel('Time (s)'); ylabel('|amplitude|');
+    title(sprintf('Pulse %d of %d  (element %d)', p, Np, kElem));
+    xlim([t(1) t(end)]);
+    drawnow;
+    pause(0.3);          % adjust speed
+end
+```
+
+## 3) Interactive slider (pick any pulse)
+
+```matlab
+fig = figure; ax = axes(fig);
+plotPulse = @(p) ( plot(ax, t, abs(Y(:,p))), grid(ax,'on'), ...
+    xlabel(ax,'Time (s)'), ylabel(ax,'|amplitude|'), ...
+    title(ax, sprintf('Pulse %d of %d  (element %d)', p, Np, kElem)) );
+
+plotPulse(1);
+sld = uicontrol('Style','slider','Units','normalized', ...
+    'Position',[0.15 0.02 0.7 0.05],'Min',1,'Max',Np,'Value',1, ...
+    'SliderStep',[1/(Np-1) 1/(Np-1)]);
+sld.Callback = @(~,~) plotPulse(round(sld.Value));
+```
+
+---
+
+### Bonus: show all pulses in a grid
+
+```matlab
+tiledlayout(ceil(Np/2),2);
+for p = 1:Np
+    nexttile; plot(t,abs(Y(:,p))); grid on
+    title(sprintf('Pulse %d',p));
+end
+```
+
+Use whichever style you prefer. If you also want to change the **element** interactively, add a second slider for `kElem` and recompute `Y = squeeze(XC(:,kElem,:));` inside its callback.
+
+You’re seeing **30 pulses** because your model is producing **three CPIs** (3×10) during the simulation.
+`Matrix→Cube` is collecting 10 pulses per CPI, but you ran the model long enough to form **3 frames**, so the cube you log has size `Nr × Ne × 30`.
+
+### Why it happens
+
+The number of pulses that appear is basically:
+
+```
+Np_measured ≈ floor( StopTime * PRF ) + 1      % first pulse at t = 0
+```
+
+If `PRF = 5000 Hz` and `StopTime = 0.006 s`, you get about `floor(0.006*5000)+1 = 31` shots (≈30–31).
+That’s why your slider shows “Pulse 30 / 30”.
+
+### Fixes (choose one)
+
+1. **Limit the simulation to one CPI**
+
+* Model Settings → **Solver** → set **Stop time** to
+
+  ```
+  (Np-1)/PRF
+  ```
+
+  For Np=10, PRF=5e3 → `Stop time = 9/5000 = 0.0018` s.
+  (Using `(Np-1)/PRF` avoids an extra pulse at exactly the end time.)
+
+2. **Drive a reset/enable so only one frame is captured**
+
+* If you’re using a “Matrix→Cube / Buffer” block that says “Take samples over 10 frames”, make sure the block outputs once and then **resets** (e.g., with an enable/reset port) so it doesn’t accumulate additional frames.
+
+3. **Trim in MATLAB after logging**
+
+```matlab
+XC = XC(:,:,1:10);   % keep only the first 10 pulses for plotting
+```
+
+### Quick sanity check in MATLAB
+
+```matlab
+[Nr,Ne,Np_measured] = size(XC);
+fprintf('Pulses captured in cube: %d\n', Np_measured);
+```
+
+In short: set **Stop time = (Np-1)/PRF** (or reset the buffer) to get exactly **10 pulses** instead of 30.
+
+To make the **data cube contain exactly one CPI** (i.e., exactly **Np pulses**), do one of the following. The cleanest is to stop the model after the last pulse in the CPI.
+
+### 1) Stop time = one CPI
+
+If PRF = `prf` and pulses-per-CPI = `Np`, set
+
+```matlab
+set_param(gcs,'StopTime',num2str((Np-1)/prf))   % e.g., Np=10, prf=5e3 => 0.0018 s
+```
+
+That gives exactly the first Np shots (first pulse at t=0, last at t=(Np-1)/PRF).
+
+### 2) Gate the “Matrix → Cube” so it collects only Np frames
+
+* Put the **Matrix→Cube** (or Buffer+Reshape) inside an **Enabled Subsystem**.
+* Use a **Counter Limited** block (Upper limit = `Np`) driven by the pulse strobe (or TR) → its output **Enable** the subsystem while `count < Np`.
+* Optionally connect the counter **hit** to a **Stop Simulation** block after Np is reached.
+
+**Typical settings**
+
+* **Buffer**: *Output buffer size per channel* = `fs/PRF` (integer), *Overlap* = `0`, *IC* = `0`.
+* **Matrix→Cube**: *Frames per cube* (or *Take samples over N frames*) = `Np`.
+* **Angle-Doppler Slicer / SMI**: feed the same **Idx (CUT)** and the same cube.
+
+### 3) If you already logged more pulses, trim in MATLAB
+
+```matlab
+[Nr,Ne,Np_measured] = size(XC);
+XC = XC(:,:,1:Np);      % keep exactly one CPI
+```
+
+### Quick verification
+
+```matlab
+[Nr,Ne,Np_measured] = size(XC);   % should equal Np
+disp([Nr Ne Np_measured])
+```
+
+Using either **(1)** or **(2)** ensures the cube is **\[Nr × Ne × Np]** for **one CPI** only.
+
+To “see the range samples from the pulses” you just look at the **fast-time** dimension of your data cube.
+If the cube you logged after *Matrix → Cube* is:
+
+```
+XC  : [Nr  ×  Ne  ×  Np]   % Nr = samples per pulse, Ne = elements, Np = pulses
+```
+
+then each column in `XC(:,k,p)` is the **range profile** (range samples) for
+element `k` and pulse `p`.
+
+---
+
+## In MATLAB
+
+```matlab
+c  = physconst('LightSpeed');
+fs = 1e6;                               % <-- your sample rate
+[Nr,Ne,Np] = size(XC);
+
+% Range axis for the fast-time samples
+r = (0:Nr-1) * c/(2*fs);                % meters per sample = c/(2*fs)
+
+% 1) Range profile of a single pulse (pick element k and pulse p)
+k = 1;  p = 1;
+rp = abs(XC(:,k,p));                    % Nr×1
+figure; plot(r, rp); grid on
+xlabel('Range (m)'); ylabel('|amplitude|');
+title(sprintf('Range profile – element %d, pulse %d',k,p));
+
+% 2) Range profile averaged across all elements (for that pulse)
+rp_avg = mean(abs(XC(:,:,p)), 2);       % Nr×1
+figure; plot(r, rp_avg); grid on
+xlabel('Range (m)'); ylabel('Mean |amplitude|');
+title(sprintf('Range profile (element-averaged) – pulse %d', p));
+
+% 3) Range-vs-pulse image (average over elements)
+RP = squeeze(mean(abs(XC),2));          % [Nr × Np]
+figure; imagesc(0:Np-1, r, 20*log10(RP/max(RP(:))+eps));
+axis xy; colorbar; colormap turbo
+xlabel('Pulse index'); ylabel('Range (m)');
+title('Range samples across pulses');
+
+% 4) Slow-time at a chosen range bin (e.g., near target range Rtgt)
+Rtgt = 1732;                             % meters
+[~,idx] = min(abs(r - Rtgt));           % range-bin index
+slow = squeeze(mean(XC(idx,:,:),2));    % [1 × Np] (avg over elements)
+figure; stem(0:Np-1, abs(slow),'filled'); grid on
+xlabel('Pulse index'); ylabel('|amplitude|');
+title(sprintf('Slow-time at %.0f m (range bin %d)',Rtgt,idx));
+```
+
+---
+
+## In Simulink (live plots)
+
+1. From **Matrix → Cube** (size `[Nr×Ne×Np]`), use two **Selector** blocks:
+
+   * **Selector #1 (Pulse)**: Select dimension 3 (pulses), index = the pulse you want.
+   * **Selector #2 (Element)**: Select dimension 2 (elements), index = the element you want
+     *(or use a Mean block over dim-2 to average across elements).*
+
+2. After those selectors you have a vector of length **Nr** = **range samples** for that pulse.
+   Feed that to an **Array Plot** (DSP System Toolbox) or **Scope** to see the range profile.
+
+3. To show **range vs pulse** as an image inside Simulink:
+
+   * Average over elements (Mean over dim-2),
+   * Use a **Reshape** to `[Nr Np]`,
+   * Send to **Matrix Viewer**.
+
+---
+
+### Useful relations
+
+* Samples per pulse: `Nr = fs / PRF`
+* Range resolution: `ΔR = c/(2*fs)`
+* Unambiguous range: `Rmax = c/(2*PRF)`
+
+This gives you everything to inspect the **range samples** of each pulse and across pulses.
+
+
+
